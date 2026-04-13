@@ -1,0 +1,13 @@
+name: watershed_env
+channels:
+  - defaults
+dependencies:
+  - ipykernel
+  - geopandas
+  - elevation
+  - python=3.11
+  - grass
+  - rasterio
+  - pyyaml
+  - compilers
+prefix: /home/mis126203/miniconda3/envs/watershed_env
