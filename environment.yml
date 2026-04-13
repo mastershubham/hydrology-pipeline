@@ -10,4 +10,3 @@ dependencies:
   - rasterio
   - pyyaml
   - compilers
-prefix: /home/mis126203/miniconda3/envs/watershed_env
