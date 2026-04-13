@@ -237,7 +237,8 @@ def main():
     "gdalwarp",
     "-t_srs", f"EPSG:{epsg}",
     str(location_of_dem),
-    str(Path(args.output) / f"dem_{epsg}.tif")
+    str(Path(args.output) / f"dem_{epsg}.tif"),
+    check=True
     ])
 
     gs.run_command("r.in.gdal",
