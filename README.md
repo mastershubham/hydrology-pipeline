@@ -9,7 +9,7 @@ git clone https://github.com/mastershubham/hydrology-pipeline
 ```
 Move to the appropriate directory.
 ```
-cd hydrolog-pipeline
+cd hydrology-pipeline
 ```
 
 Install conda for setting up virtual environment. Then setup the environment using the YAML file.  
