@@ -1,6 +1,7 @@
-name: watershed_env
+name: hydro_stack_env
 channels:
   - defaults
+  - conda-forge
 dependencies:
   - ipykernel
   - geopandas
@@ -8,5 +9,3 @@ dependencies:
   - python=3.11
   - grass
   - rasterio
-  - pyyaml
-  - compilers
