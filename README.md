@@ -24,6 +24,7 @@ Now run the command as:
 docker run --rm \
     -v ./data:/app/data \
     -v ~/grassdata:/root/grassdata \
+    -v ./masalia:/app/masalia \
     -w /app \
     <name_of_the_image> \
     python3 hydrological_analysis.py \
