@@ -41,15 +41,8 @@ def parse_args():
         description="GRASS GIS Hydrological Analysis Pipeline"
     )
     parser.add_argument(
-    rasters_to_export = {
-            "dem_filled":           dem_filled,
-            "flow_direction":       flow_dir,
-            "flow_accumulation":    flow_accumulation,
-            "natural_depressions":  depressions
-        }
-    vectors_to_export = {
         "--shp", required=True,
-        help="Path to input shapefile"
+        help="Path to input shapefile defining the watershed boundary"
     )
     parser.add_argument(
         "--output", required=True,
