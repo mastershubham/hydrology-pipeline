@@ -12,10 +12,10 @@ Move to the appropriate directory.
 cd hydrology-pipeline
 ```
 
-Install conda for setting up virtual environment. Then setup the environment using the YAML file.  
+We are using Docker for working in a containerized environment. Ensure that docker is installed on your device and has network connection. 
 
 ```
-conda env create -f environment.yml
+docker build -t <name_of_the_image> .
 ```
 Put up the data somewhere preferably under hydrology-pipeline or some folder under it.
 
