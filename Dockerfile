@@ -6,6 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     grass \
+    make \
     python3-pip \
     python3-dev \
     python3-venv \
@@ -24,7 +25,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create a non-root user for security
-RUN useradd -m appuser && chown -R appuser /app
-USER appuser
+#RUN useradd -m appuser && chown -R appuser /app
+#USER appuser
 
 CMD ["python3", "hydrological_analysis.py", "--help"]
