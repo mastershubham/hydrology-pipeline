@@ -33,7 +33,7 @@ import time
 
 import rasterio
 
-MIN_WATERSHED_SIZE = 5555 # Translats to roughly 500 hectares at 30m resolution (500 * 10000 / (30*30) = 5555 cells)
+MIN_WATERSHED_SIZE = 5555 # Translates to roughly 500 hectares at 30m resolution (500 * 10000 / (30*30) = 5555 cells)
 # 0. Argument parser
 
 def parse_args():
@@ -41,6 +41,13 @@ def parse_args():
         description="GRASS GIS Hydrological Analysis Pipeline"
     )
     parser.add_argument(
+    rasters_to_export = {
+            "dem_filled":           dem_filled,
+            "flow_direction":       flow_dir,
+            "flow_accumulation":    flow_accumulation,
+            "natural_depressions":  depressions
+        }
+    vectors_to_export = {
         "--shp", required=True,
         help="Path to input shapefile"
     )
@@ -237,8 +244,7 @@ def main():
     "gdalwarp",
     "-t_srs", f"EPSG:{epsg}",
     str(location_of_dem),
-    str(Path(args.output) / f"dem_{epsg}.tif"),
-    check=True
+    str(Path(args.output) / f"dem_{epsg}.tif")
     ])
 
     gs.run_command("r.in.gdal",
@@ -247,15 +253,20 @@ def main():
                overwrite=True)
 
     gs.run_command("g.region", raster="dem_utm", flags="p")
-    
+
     watershed_utm_path = Path(args.output) / "watershed_utm.shp"
     watershed_gdf.to_crs(epsg=epsg).to_file(watershed_utm_path)
     gs.run_command("v.in.ogr",
                    input=str(watershed_utm_path),
                    output="watershed",
                    overwrite=True)
+    
+    try:
+        gs.run_command("r.mask", flags="r")
+    except:
+        pass
     gs.run_command("r.mask",
-                   vector="watershed")
+               vector="watershed")
     
     print("DEM imported into GRASS and region set to DEM extent.")
 
