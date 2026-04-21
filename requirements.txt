@@ -2,3 +2,4 @@ ipykernel
 geopandas
 elevation
 rasterio
+matplotlib
