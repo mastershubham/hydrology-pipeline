@@ -21,5 +21,13 @@ Put up the data somewhere preferably under hydrology-pipeline or some folder und
 
 Now run the command as:
 ```
-python hydrological_analysis.py --shp <path_to_shapefile> --output <output_directory> --grassdb <location_of_grass_database>
+docker run --rm \
+    -v ./data:/app/data \
+    -v ~/grassdata:/root/grassdata \
+    -w /app \
+    <name_of_the_image> \
+    python3 hydrological_analysis.py \
+        --shp ./data/masalia_tehsil_boundary.shp \
+        --output masalia \
+        --grassdb /root/grassdata
 ```
