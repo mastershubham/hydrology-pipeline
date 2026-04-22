@@ -172,7 +172,7 @@ def export_outputs(output_dir, rasters_to_export: dict, vectors_to_export: dict)
                    output=str(output_path),
                    format="GTiff",
                    type="Float32",
-                   createopt="COMPRESS=LZW",
+                   createopt="COMPRESS=LZW,PHOTOMETRIC=MINISBLACK",
                    flags="f",
                    overwrite=True)
         print(f"Exported raster: {output_path}")
