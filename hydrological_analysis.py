@@ -57,8 +57,8 @@ def parse_args():
         help="Flow-accumulation threshold for stream extraction (default: 500 cells)"
     )
     parser.add_argument(
-        "--min_watershed_size", type=int, default=1000,
-        help="Minimum watershed size in cells (default: 1000)"
+        "--min_watershed_size", type=int, default=MIN_WATERSHED_SIZE,
+        help="Minimum watershed size in cells (default: 5555 cells, ~500 hectares at 30m resolution)"
     )
 
     return parser.parse_args()
@@ -146,21 +146,22 @@ def fill_sinks(dem_raster):
 
 def natural_depressions(dem_filled, dem_original):
     import grass.script as gs
-    natural_depressions = "natural_depressions"
-    gs.run_command("r.mapcalc", expr=f"{natural_depressions} = {dem_filled} - {dem_original}", overwrite=True)
-    return natural_depressions
+    dep_map = "natural_depressions"
+    gs.run_command("r.mapcalc", expr=f"{dep_map} = {dem_filled} - {dem_original}", overwrite=True)
+    return dep_map
 
 def calculate_flow_accumulation(dem_filled, threshold):
     import grass.script as gs
     gs.run_command("r.watershed", 
                 elevation=dem_filled, 
                 accumulation="flow_acc", 
-                threshold=MIN_WATERSHED_SIZE,
+                drainage="flow_dir_watershed",
+                threshold=threshold,
                 basin="micro_watersheds",
                 #stream="streams_raw",
                 flags="as",          # -a: positive accumulation; -s: single-flow (D8) 
                 overwrite=True)
-    return "flow_acc", "micro_watersheds"
+    return "flow_acc", "flow_dir_watershed", "micro_watersheds"
 
 def export_outputs(output_dir, rasters_to_export: dict, vectors_to_export: dict):
     import grass.script as gs
@@ -170,20 +171,22 @@ def export_outputs(output_dir, rasters_to_export: dict, vectors_to_export: dict)
                    input=raster,
                    output=str(output_path),
                    format="GTiff",
+                   type="Float32",
                    createopt="COMPRESS=LZW",
+                   flags="f",
                    overwrite=True)
         print(f"Exported raster: {output_path}")
 
-    for name, vector in vectors_to_export.items():
+    for name, (vector, geom_type) in vectors_to_export.items():
         output_path = Path(output_dir) / f"{name}.geojson"
         gs.run_command("v.out.ogr",
                    input=vector,
                    output=str(output_path),
                    format="GeoJSON",
+                   type=geom_type,
                    overwrite=True)
         print(f"Exported vector: {output_path}")
     return
-
 
 # Main function
 def main():
@@ -279,14 +282,24 @@ def main():
     depressions = natural_depressions(dem_filled, "dem_utm")
     
     
-    flow_accumulation, micro_watersheds = calculate_flow_accumulation(dem_filled, args.threshold)
+    flow_accumulation, flow_dir_ws, micro_watersheds = calculate_flow_accumulation(dem_filled, args.min_watershed_size)
 
     gs.run_command("r.stream.extract",
                elevation=dem_filled,
                accumulation=flow_accumulation,
+               direction=flow_dir_ws,
                stream_raster="streams_rast",
                stream_vector="streams_vect",
-               threshold=args.threshold, 
+               threshold=args.min_watershed_size, 
+               overwrite=True)
+
+    gs.run_command("r.stream.order",
+               stream_rast="streams_rast",
+               direction=flow_dir_ws,
+               elevation=dem_filled,
+               accumulation=flow_accumulation,
+               strahler="strahler_order",
+               shreve="shreve_order",
                overwrite=True)
 
     gs.run_command("r.to.vect",
@@ -299,13 +312,14 @@ def main():
     
     rasters_to_export = {
             "dem_filled":           dem_filled,
-            "flow_direction":       flow_dir,
+            "flow_direction":       flow_dir_ws,
             "flow_accumulation":    flow_accumulation,
-            "natural_depressions":  depressions
+            "natural_depressions":  depressions,
+            "stream_order":         "strahler_order"
         }
     vectors_to_export = {
-            "streams":              "streams_vect",
-            "micro_watersheds":     "watersheds_vect"
+            "streams":              ("streams_vect", "line"),
+            "micro_watersheds":     ("watersheds_vect", "area")
         }
     export_outputs(args.output, rasters_to_export, vectors_to_export)
 
