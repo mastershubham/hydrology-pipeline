@@ -29,7 +29,6 @@ import shutil
 import os
 import sys
 import subprocess
-import time
 import rasterio
 import json
 import numpy as np
@@ -203,7 +202,7 @@ def compute_pour_points(micro_watersheds_rast: str,
     print(f"[pour points] Vector '{output_vector}' created.")
     return output_vector
  
- def compute_catchment_area(flow_acc_rast: str,
+def compute_catchment_area(flow_acc_rast: str,
                            dem_rast: str,
                            output_rast: str = "catchment_area_m2") -> str:
     import grass.script as gs
@@ -481,7 +480,7 @@ def main():
                type="area",
                overwrite=True)
 
-     pour_points_vect = compute_pour_points(
+    pour_points_vect = compute_pour_points(
         micro_watersheds_rast=micro_watersheds,
         flow_acc_rast=flow_accumulation,
         output_vector="pour_points"
