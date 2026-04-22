@@ -282,7 +282,7 @@ def main():
     depressions = natural_depressions(dem_filled, "dem_utm")
     
     
-    flow_accumulation, flow_dir_ws, micro_watersheds = calculate_flow_accumulation(dem_filled, args.threshold)
+    flow_accumulation, flow_dir_ws, micro_watersheds = calculate_flow_accumulation(dem_filled, args.min_watershed_size)
 
     gs.run_command("r.stream.extract",
                elevation=dem_filled,
@@ -290,7 +290,7 @@ def main():
                direction=flow_dir_ws,
                stream_raster="streams_rast",
                stream_vector="streams_vect",
-               threshold=args.min_watershed_size, 
+               threshold=args.threshold, 
                overwrite=True)
 
     gs.run_command("r.stream.order",
