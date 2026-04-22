@@ -213,7 +213,6 @@ def compute_pour_points(micro_watersheds_rast: str,
         separator="comma",
         skip=1,          # skip header row
         x=1, y=2,        # column indices (1-based)
-        cat=3,           # basin_id as category
         columns="x double,y double,basin_id int,flow_acc_val double",
         overwrite=True
     )
