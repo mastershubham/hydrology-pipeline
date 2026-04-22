@@ -170,7 +170,7 @@ def compute_pour_points(micro_watersheds_rast: str,
     import grass.script as gs
     from grass.script import array as garray
 
-    print("Pour Points Calculation: Locating outlet cell for each micro-watershed …")
+    print("Pour Points Calculation: Locating outlet cell for each micro-watershed.")
 
     region = gs.region()
     w     = region["w"]
@@ -178,7 +178,13 @@ def compute_pour_points(micro_watersheds_rast: str,
     ewres = region["ewres"]
     nsres = region["nsres"]
 
-    basin_arr = garray.array(micro_watersheds_rast, null=-9999)
+    gs.run_command(
+        "r.mapcalc",
+        expr="micro_watersheds_int = int(micro_watersheds)",
+        overwrite=True
+    )
+
+    basin_arr = garray.array("micro_watersheds_int", null=-9999)
     acc_arr   = garray.array(flow_acc_rast, null=-1)
 
     basin_ids = np.unique(basin_arr)
@@ -201,7 +207,7 @@ def compute_pour_points(micro_watersheds_rast: str,
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv",
                                       delete=False, newline="")
     writer = csv.writer(tmp)
-    writer.writerow(["x", "y", "basin_id", "flow_acc_val"])
+    writer.writerow(["basin_id", "x", "y", "flow_acc_val"])  # basin_id first
     writer.writerows(records)
     tmp.close()
 
@@ -211,16 +217,17 @@ def compute_pour_points(micro_watersheds_rast: str,
         output=output_vector,
         format="point",
         separator="comma",
-        skip=1,          # skip header row
-        x=1, y=2,        # column indices (1-based)
-        columns="x double,y double,basin_id int,flow_acc_val double",
+        skip=1,
+        x=2, y=3,        # x is col 2, y is col 3 (1-based)
+        cat=1,           # basin_id (integer) is col 1 → used as category
+        columns="basin_id int,x double,y double,flow_acc_val double",
         overwrite=True
     )
 
     os.unlink(tmp.name)
     print(f"Pour Points: Vector '{output_vector}' created with {len(records)} points.")
-    return output_vector 
-
+    return output_vector
+                            
 def compute_catchment_area(flow_acc_rast: str,
                            dem_rast: str,
                            output_rast: str = "catchment_area_m2") -> str:
