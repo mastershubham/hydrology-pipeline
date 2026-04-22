@@ -168,40 +168,60 @@ def compute_pour_points(micro_watersheds_rast: str,
                         flow_acc_rast: str,
                         output_vector: str = "pour_points") -> str:
     import grass.script as gs
- 
+    from grass.script import array as garray
+
     print("Pour Points Calculation: Locating outlet cell for each micro-watershed …")
+
+    region = gs.region()
+    w     = region["w"]
+    n     = region["n"]
+    ewres = region["ewres"]
+    nsres = region["nsres"]
+
+    basin_arr = garray.array(micro_watersheds_rast, null=-9999)
+    acc_arr   = garray.array(flow_acc_rast, null=-1)
+
+    basin_ids = np.unique(basin_arr)
+    basin_ids = basin_ids[(basin_ids > 0) & (basin_ids != -9999)]
                             
+    records = []
+    for bid in basin_ids:
+        mask = basin_arr == bid
+        if not mask.any():
+            continue
+        local_acc = np.where(mask, acc_arr, -np.inf)
+        row, col  = np.unravel_index(np.argmax(local_acc), local_acc.shape)
+        max_acc   = float(acc_arr[row, col])
+    
+        x = w + (col + 0.5) * ewres
+        y = n - (row + 0.5) * nsres
+        records.append((int(bid), x, y, max_acc))
+
+    import tempfile, csv
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv",
+                                      delete=False, newline="")
+    writer = csv.writer(tmp)
+    writer.writerow(["x", "y", "basin_id", "flow_acc_val"])
+    writer.writerows(records)
+    tmp.close()
+
     gs.run_command(
-        "r.statistics",
-        base=micro_watersheds_rast,
-        cover=flow_acc_rast,
-        method="max",
-        output="basin_max_acc",
-        overwrite=True
-    )
- 
-    gs.run_command(
-        "r.mapcalc",
-        expr=(
-            "pour_point_cells = "
-            f"if({flow_acc_rast} == basin_max_acc, {micro_watersheds_rast}, null())"
-        ),
-        overwrite=True
-    )
- 
-    gs.run_command(
-        "r.to.vect",
-        input="pour_point_cells",
+        "v.in.ascii",
+        input=tmp.name,
         output=output_vector,
-        type="point",
-        column="basin_id",
-        flags="v",          # -v: smooth, use raster centroid for point location
+        format="point",
+        separator="comma",
+        skip=1,          # skip header row
+        x=1, y=2,        # column indices (1-based)
+        cat=3,           # basin_id as category
+        columns="x double,y double,basin_id int,flow_acc_val double",
         overwrite=True
     )
- 
-    print(f"[pour points] Vector '{output_vector}' created.")
-    return output_vector
- 
+
+    os.unlink(tmp.name)
+    print(f"Pour Points: Vector '{output_vector}' created with {len(records)} points.")
+    return output_vector 
+
 def compute_catchment_area(flow_acc_rast: str,
                            dem_rast: str,
                            output_rast: str = "catchment_area_m2") -> str:
