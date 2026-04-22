@@ -53,8 +53,8 @@ def parse_args():
         help="Directory for GRASS GIS database (default: ~/grassdata)"
     )
     parser.add_argument(
-        "--threshold", type=int, default=500,
-        help="Flow-accumulation threshold for stream extraction (default: 500 cells)"
+        "--threshold", type=int, default=100,
+        help="Flow-accumulation threshold for stream extraction (default: 100 cells)"
     )
     parser.add_argument(
         "--min_watershed_size", type=int, default=MIN_WATERSHED_SIZE,
@@ -282,7 +282,7 @@ def main():
     depressions = natural_depressions(dem_filled, "dem_utm")
     
     
-    flow_accumulation, flow_dir_ws, micro_watersheds = calculate_flow_accumulation(dem_filled, args.min_watershed_size)
+    flow_accumulation, flow_dir_ws, micro_watersheds = calculate_flow_accumulation(dem_filled, args.threshold)
 
     gs.run_command("r.stream.extract",
                elevation=dem_filled,
