@@ -30,8 +30,9 @@ import os
 import sys
 import subprocess
 import time
-
 import rasterio
+import json
+import numpy as np
 
 MIN_WATERSHED_SIZE = 5555 # Translates to roughly 500 hectares at 30m resolution (500 * 10000 / (30*30) = 5555 cells)
 # 0. Argument parser
@@ -162,6 +163,178 @@ def calculate_flow_accumulation(dem_filled, threshold):
                 flags="as",          # -a: positive accumulation; -s: single-flow (D8) 
                 overwrite=True)
     return "flow_acc", "flow_dir_watershed", "micro_watersheds"
+
+
+def compute_pour_points(micro_watersheds_rast: str,
+                        flow_acc_rast: str,
+                        output_vector: str = "pour_points") -> str:
+    import grass.script as gs
+ 
+    print("Pour Points Calculation: Locating outlet cell for each micro-watershed …")
+                            
+    gs.run_command(
+        "r.statistics",
+        base=micro_watersheds_rast,
+        cover=flow_acc_rast,
+        method="max",
+        output="basin_max_acc",
+        overwrite=True
+    )
+ 
+    gs.run_command(
+        "r.mapcalc",
+        expr=(
+            "pour_point_cells = "
+            f"if({flow_acc_rast} == basin_max_acc, {micro_watersheds_rast}, null())"
+        ),
+        overwrite=True
+    )
+ 
+    gs.run_command(
+        "r.to.vect",
+        input="pour_point_cells",
+        output=output_vector,
+        type="point",
+        column="basin_id",
+        flags="v",          # -v: smooth, use raster centroid for point location
+        overwrite=True
+    )
+ 
+    print(f"[pour points] Vector '{output_vector}' created.")
+    return output_vector
+ 
+ def compute_catchment_area(flow_acc_rast: str,
+                           dem_rast: str,
+                           output_rast: str = "catchment_area_m2") -> str:
+    import grass.script as gs
+ 
+    print("Catchment area: Computing contributing area in m² …")
+ 
+    # Retrieve current region resolution
+    region = gs.region()
+    cell_area = abs(region["nsres"]) * abs(region["ewres"])
+    print(f"Catchment area: Cell area = {cell_area:.2f} m²")
+ 
+    gs.run_command(
+        "r.mapcalc",
+        expr=f"{output_rast} = {flow_acc_rast} * {cell_area}",
+        overwrite=True
+    )
+ 
+    # Set a human-readable unit in the raster metadata
+    gs.run_command(
+        "r.support",
+        map=output_rast,
+        units="m2",
+        description="Specific catchment area (contributing area in square metres)"
+    )
+ 
+    print(f"Catchment area: Raster '{output_rast}' created.")
+    return output_rast
+ 
+def compute_mws_connectivity(micro_watersheds_rast: str,
+                             flow_dir_rast: str,
+                             micro_watersheds_vect: str,
+                             output_geojson: Path) -> None:
+    import grass.script as gs
+    from grass.script import array as garray
+ 
+    print("MWS connectivity: Building micro-watershed connectivity graph …")
+ 
+    basin_arr  = garray.array(micro_watersheds_rast, null=-9999)
+    flowdir_arr = garray.array(flow_dir_rast, null=0)
+ 
+    region = gs.region()
+    nrows, ncols = int(region["rows"]), int(region["cols"])
+    n      = region["n"]
+    w      = region["w"]
+    nsres  = region["nsres"]
+    ewres  = region["ewres"]
+ 
+    DIR_OFFSETS = {
+        1: ( 1,  1),
+        2: ( 1,  0),
+        3: ( 1, -1),
+        4: ( 0, -1),
+        5: (-1, -1),
+        6: (-1,  0),
+        7: (-1,  1),
+        8: ( 0,  1),
+    }
+ 
+    acc_arr = garray.array("flow_acc", null=-1)
+ 
+    basin_ids = np.unique(basin_arr)
+    basin_ids = basin_ids[(basin_ids > 0) & (basin_ids != -9999)]
+ 
+    pour_pts = {}
+    for bid in basin_ids:
+        mask = basin_arr == bid
+        if not mask.any():
+            continue
+        local_acc = np.where(mask, acc_arr, -np.inf)
+        idx = np.unravel_index(np.argmax(local_acc), local_acc.shape)
+        pour_pts[int(bid)] = idx  # (row, col)
+ 
+    def rc_to_xy(row, col):
+        """Convert raster row/col to map coordinates (cell centre)."""
+        x = w + (col + 0.5) * ewres
+        y = n - (row + 0.5) * nsres
+        return x, y
+ 
+    basin_centroids = {}
+    for bid in basin_ids:
+        mask = basin_arr == bid
+        rows_idx, cols_idx = np.where(mask)
+        cx = w + (cols_idx.mean() + 0.5) * ewres
+        cy = n - (rows_idx.mean() + 0.5) * nsres
+        basin_centroids[int(bid)] = (cx, cy)
+ 
+    edges = {}
+
+    for bid, (pr, pc) in pour_pts.items():
+        direction = int(flowdir_arr[pr, pc])
+        if direction not in DIR_OFFSETS:
+            continue 
+        dr, dc = DIR_OFFSETS[direction]
+        nr_, nc_ = pr + dr, pc + dc
+        if not (0 <= nr_ < nrows and 0 <= nc_ < ncols):
+            continue  # flows outside raster extent
+        downstream_basin = int(basin_arr[nr_, nc_])
+        if downstream_basin <= 0 or downstream_basin == -9999:
+            continue
+        if downstream_basin != bid:
+            edge_key = (bid, downstream_basin)
+            edges[edge_key] = True
+ 
+    features = []
+    for (from_id, to_id) in edges:
+        if from_id not in basin_centroids or to_id not in basin_centroids:
+            continue
+        x0, y0 = basin_centroids[from_id]
+        x1, y1 = basin_centroids[to_id]
+        feat = {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[x0, y0], [x1, y1]]
+            },
+            "properties": {
+                "from_basin_id": from_id,
+                "to_basin_id":   to_id
+            }
+        }
+        features.append(feat)
+ 
+    geojson = {
+        "type": "FeatureCollection",
+        "features": features
+    }
+ 
+    with open(output_geojson, "w") as f:
+        json.dump(geojson, f, indent=2)
+ 
+    print(f"MWS connectivity: {len(features)} directed edges written → {output_geojson}")
 
 def export_outputs(output_dir, rasters_to_export: dict, vectors_to_export: dict):
     import grass.script as gs
@@ -307,19 +480,40 @@ def main():
                output="watersheds_vect",
                type="area",
                overwrite=True)
-    
-    gs.run_command("r.mask", flags="r") 
+
+     pour_points_vect = compute_pour_points(
+        micro_watersheds_rast=micro_watersheds,
+        flow_acc_rast=flow_accumulation,
+        output_vector="pour_points"
+    )
+ 
+    catchment_area_rast = compute_catchment_area(
+        flow_acc_rast=flow_accumulation,
+        dem_rast=dem_filled,
+        output_rast="catchment_area_m2"
+    )
+ 
+    gs.run_command("r.mask", flags="r")
+
+    compute_mws_connectivity(
+        micro_watersheds_rast=micro_watersheds,
+        flow_dir_rast=flow_dir_ws,
+        micro_watersheds_vect="watersheds_vect",
+        output_geojson=Path(args.output) / "mws_connectivity.geojson"
+    )
     
     rasters_to_export = {
             "dem_filled":           dem_filled,
             "flow_direction":       flow_dir_ws,
             "flow_accumulation":    flow_accumulation,
             "natural_depressions":  depressions,
-            "stream_order":         "strahler_order"
+            "stream_order":         "strahler_order",
+            "catchment_area_m2":    catchment_area_rast
         }
     vectors_to_export = {
             "streams":              ("streams_vect", "line"),
-            "micro_watersheds":     ("watersheds_vect", "area")
+            "micro_watersheds":     ("watersheds_vect", "area"),
+            "pour_points":          (pour_points_vect,  "point")
         }
     export_outputs(args.output, rasters_to_export, vectors_to_export)
 
