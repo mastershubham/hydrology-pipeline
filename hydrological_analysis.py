@@ -69,51 +69,43 @@ def setup_grass_session(grassdb: str, epsg: int, project_name: str = "hydro_proj
     location = project_name
     mapset = "PERMANENT"
 
-    try:
-        from grass_session import Session
-        session = Session()
-        
-        # Create location FIRST if it doesn't exist (grass_session can't auto-create)
-        loc_path = grassdb_path / location
-        if not loc_path.exists():
-            grassdb_path.mkdir(parents=True, exist_ok=True)
-            grass_bin = shutil.which("grass")
-            subprocess.run([
-                grass_bin, "-c", f"EPSG:{epsg}", "-e", str(loc_path)
-            ], check=True)
-            print(f"[INFO] GRASS location created: {loc_path}")
-        
-        # Now open the existing location
-        session.open(
-            gisdb=str(grassdb_path),
-            location=location,
-            mapset=mapset,
-        )
-        print("grass_session initialised successfully.")
-        return session, None
-    except ImportError:
-        pass
-
-    # Fallback: manual gsetup (your existing code is fine here)
-    grass_bin = shutil.which("grass") 
+    grass_bin = shutil.which("grass")
     if grass_bin is None:
-        sys.exit("ERROR: GRASS GIS not found. Install it and ensure 'grass' is on PATH.")
+        sys.exit("ERROR: GRASS GIS not found on PATH.")
 
-    result = subprocess.run([grass_bin, "--config", "python_path"], capture_output=True, text=True)
+    result = subprocess.run(
+        [grass_bin, "--config", "python_path"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONWARNINGS": "ignore"})
+
     grass_python = result.stdout.strip()
     if grass_python and grass_python not in sys.path:
         sys.path.insert(0, grass_python)
+        print(f"[INFO] Added GRASS python path: {grass_python}")
 
     loc_path = grassdb_path / location
     if not loc_path.exists():
         grassdb_path.mkdir(parents=True, exist_ok=True)
-        subprocess.run([grass_bin, "-c", f"EPSG:{epsg}", "-e", str(loc_path)], check=True)
-        print(f"GRASS location created: {loc_path}")
+        subprocess.run([grass_bin, "-c", f"EPSG:{epsg}", "-e", str(loc_path)],
+                       check=True)
+        print(f"[INFO] GRASS location created: {loc_path}")
 
+    # Trying grass_session first, fall back to gsetup
+    try:
+        from grass_session import Session
+        session = Session()
+        session.open(gisdb=str(grassdb_path), location=location, mapset=mapset)
+        print("grass_session initialised successfully.")
+        return session
+    except ImportError:
+        pass
+
+    # Fallback: manual gsetup
     import grass.script.setup as gsetup
     gsetup.init(str(grassdb_path), location, mapset)
     print("GRASS environment initialised via grass.script.setup")
-    return None, grass_bin
+    return None
 
 def get_utm_epsg_for_bbox(bbox):
     west, south, east, north = bbox
@@ -430,8 +422,10 @@ def main():
     # 1. Setup GRASS session
     
     name_of_proj = Path(args.output).resolve().name
-    session, grass_bin = setup_grass_session(args.grassdb, epsg, name_of_proj)
-
+    session = setup_grass_session(args.grassdb, epsg, name_of_proj)
+    if session:
+        session.close()
+    
     import grass.script as gs
 
     subprocess.run([
