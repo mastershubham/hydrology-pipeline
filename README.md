@@ -5,11 +5,11 @@ Generic pipeline that runs standard hydrology algorithms for a given area of int
 First clone/download this Github repository. 
 
 ```
-git clone https://github.com/mastershubham/hydrology-pipeline
+git clone https://github.com/mastershubham/hydro_stack
 ```
 Move to the appropriate directory.
 ```
-cd hydrology-pipeline
+cd hydro_stack
 ```
 
 We are using Docker for working in a containerized environment. Ensure that docker is installed on your device and has network connection. 
