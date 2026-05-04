@@ -353,6 +353,133 @@ def compute_mws_connectivity(micro_watersheds_rast: str,
  
     print(f"MWS connectivity: {len(features)} directed edges written → {output_geojson}")
 
+def compute_catchments_with_stream_order(
+    micro_watersheds_rast: str,
+    streams_rast: str,
+    strahler_rast: str,
+    flow_acc_rast: str,
+    output_vector: str = "catchments_with_order"
+) -> str:
+    """
+    Delineate one catchment polygon per stream segment and tag it with
+    the Strahler order of that segment.
+
+    Strategy:
+      1. r.stats to cross-tabulate micro_watersheds × streams_rast
+         → find which stream segment (if any) runs through each basin.
+      2. r.stats to read Strahler order per stream segment.
+      3. Join: basin_id → seg_id → strahler_order.
+      4. Write a reclass rule file and produce a new integer raster
+         where each basin cell holds its Strahler order.
+      5. r.to.vect to polygonise → every polygon attribute carries
+         the Strahler order of its stream.
+    """
+    import grass.script as gs
+    from grass.script import array as garray
+    import tempfile, os
+    import numpy as np
+
+    print("Catchments with stream order: building …")
+
+    # ── 1. Which stream segment runs through each micro-watershed? ─────────────
+    # Cross-tabulate basin IDs against stream segment IDs.
+    # r.stats on two rasters gives "basin_id  seg_id  count" for co-occurring cells.
+    cross_raw = gs.read_command(
+        "r.stats",
+        input=f"{micro_watersheds_rast},{streams_rast}",
+        flags="cn",          # -c: cell counts, -n: skip nulls
+        separator="space",
+    )
+
+    # For each basin keep the segment with the highest cell count
+    # (handles the rare case where two segments clip the same basin).
+    basin_to_seg: dict[int, tuple[int, int]] = {}   # basin_id → (seg_id, count)
+    for line in cross_raw.strip().splitlines():
+        parts = line.split()
+        if len(parts) != 3:
+            continue
+        basin_id, seg_id, count = int(parts[0]), int(parts[1]), int(parts[2])
+        if basin_id not in basin_to_seg or count > basin_to_seg[basin_id][1]:
+            basin_to_seg[basin_id] = (seg_id, count)
+
+    # ── 2. Strahler order per stream segment ──────────────────────────────────
+    order_raw = gs.read_command(
+        "r.stats",
+        input=f"{streams_rast},{strahler_rast}",
+        flags="cn",
+        separator="space",
+    )
+
+    seg_to_order: dict[int, int] = {}
+    for line in order_raw.strip().splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            seg_to_order[int(parts[0])] = int(parts[1])
+
+    if not seg_to_order:
+        raise RuntimeError(
+            "No Strahler order values found — check that streams_rast "
+            f"and '{strahler_rast}' overlap spatially."
+        )
+
+    # ── 3. Join: basin_id → strahler_order ────────────────────────────────────
+    basin_to_order: dict[int, int] = {}
+    unmatched = []
+    for basin_id, (seg_id, _) in basin_to_seg.items():
+        if seg_id in seg_to_order:
+            basin_to_order[basin_id] = seg_to_order[seg_id]
+        else:
+            unmatched.append(basin_id)
+
+    if unmatched:
+        print(f"  [WARN] {len(unmatched)} basins had no matching stream order "
+              f"(headwater slivers?) — they will be NULL in output.")
+
+    # ── 4. Reclassify micro-watershed raster → strahler order values ──────────
+    temp_order_rast = "tmp_catchment_strahler"
+    rules_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    for basin_id, order in basin_to_order.items():
+        rules_file.write(f"{basin_id} = {order}\n")
+    rules_file.write("* = NULL\n")
+    rules_file.close()
+
+    gs.run_command(
+        "r.reclass",
+        input=micro_watersheds_rast,
+        output=temp_order_rast,
+        rules=rules_file.name,
+        overwrite=True,
+    )
+    os.unlink(rules_file.name)
+
+    # ── 5. Polygonise: each catchment polygon carries its Strahler order ───────
+    # r.to.vect column= sets the attribute name for the raster value.
+    gs.run_command(
+        "r.to.vect",
+        input=temp_order_rast,
+        output=output_vector,
+        type="area",
+        flags="s",                # -s: smooth
+        overwrite=True,
+    )
+    gs.run_command(
+        "v.db.addcolumn",
+        map=output_vector,
+        columns="strahler_order int",
+    )
+
+    gs.run_command(
+        "v.db.update",
+        map=output_vector,
+        column="strahler_order",
+        query_column="cat",)
+
+    gs.run_command("g.remove", type="raster", name=temp_order_rast, flags="f")
+
+    print(f"  → '{output_vector}' ready: {len(basin_to_order)} catchment polygons "
+          f"tagged with Strahler order (1–{max(basin_to_order.values())}).")
+    return output_vector
+
 def export_outputs(output_dir, rasters_to_export: dict, vectors_to_export: dict):
     import grass.script as gs
     for name, raster in rasters_to_export.items():
@@ -492,9 +619,37 @@ def main():
                accumulation=flow_accumulation,
                strahler="strahler_order",
                shreve="shreve_order",
+               stream_vect="streams_with_order",
                overwrite=True)
+    # Join stream_type and type_code from streams_vect into streams_with_order
+    # Both vectors share 'cat' as the common key
+    gs.run_command(
+               "v.db.join",
+                map="streams_with_order",
+                column="cat",
+                other_table="streams_vect",
+                other_column="cat",
+                subset_columns="stream_type,type_code",
+                )
+    all_columns = gs.read_command(
+            "v.info", map="streams_with_order", flags="c"
+            ).strip().splitlines()
 
-    gs.run_command("r.to.vect",
+    keep = {"cat", "stream_type", "type_code", "network", "strahler", "next_stream", "prev_str01", "prev_str02"}
+
+    drop_cols = [
+    line.split("|")[1]
+    for line in all_columns
+    if "|" in line and line.split("|")[1] not in keep]
+
+    if drop_cols:
+        gs.run_command(
+            "v.db.dropcolumn",
+            map="streams_with_order",
+            columns=",".join(drop_cols)
+        )
+        print(f"Dropped columns: {drop_cols}")
+        gs.run_command("r.to.vect",
                input="micro_watersheds",
                output="watersheds_vect",
                type="area",
@@ -513,13 +668,30 @@ def main():
     )
  
     gs.run_command("r.mask", flags="r")
+    
+    catchments_vect = compute_catchments_with_stream_order(
+        micro_watersheds_rast=micro_watersheds,   
+        streams_rast="streams_rast",
+        strahler_rast="strahler_order",
+        flow_acc_rast=flow_accumulation,
+        output_vector="catchments_with_order",
+    )
 
+    gs.run_command(
+        "v.to.rast",
+        input=catchments_vect,
+        output="catchments_strahler_rast",
+        use="attr",
+        attribute_column="strahler_order",
+        type="area",
+        overwrite=True,
+    )
     compute_mws_connectivity(
         micro_watersheds_rast=micro_watersheds,
         flow_dir_rast=flow_dir_ws,
-        micro_watersheds_vect="watersheds_vect",
+        micro_watersheds_vect="watersheds_vect",         
         output_geojson=Path(args.output) / "mws_connectivity.geojson"
-    )
+)
     
     rasters_to_export = {
             "dem_filled":           dem_filled,
@@ -527,11 +699,11 @@ def main():
             "flow_accumulation":    flow_accumulation,
             "natural_depressions":  depressions,
             "stream_order":         "strahler_order",
-            "catchment_area_m2":    catchment_area_rast
+            "catchment_area_m2":    catchment_area_rast,
+            "catchments_strahler":  "catchments_strahler_rast"
         }
     vectors_to_export = {
-            "streams":              ("streams_vect", "line"),
-            "micro_watersheds":     ("watersheds_vect", "area"),
+            "streams":              ("streams_with_order", "line"),
             "pour_points":          (pour_points_vect,  "point")
         }
     export_outputs(args.output, rasters_to_export, vectors_to_export)
