@@ -17,7 +17,7 @@ We are using Docker for working in a containerized environment. Ensure that dock
 ```
 docker build -t <name_of_the_image> .
 ```
-Put up the data somewhere preferably under hydrology-pipeline or some folder under it.
+Put up the data somewhere preferably under hydro_stack or some folder under it.
 
 Now run the command as:
 ```
