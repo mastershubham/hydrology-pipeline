@@ -704,7 +704,8 @@ def main():
         }
     vectors_to_export = {
             "streams":              ("streams_with_order", "line"),
-            "pour_points":          (pour_points_vect,  "point")
+            "pour_points":          (pour_points_vect,  "point"),
+            "microwatersheds":      ("watersheds_vect", "area"),
         }
     export_outputs(args.output, rasters_to_export, vectors_to_export)
 
