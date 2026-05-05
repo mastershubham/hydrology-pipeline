@@ -36,7 +36,6 @@ import math
 
 
 MIN_WATERSHED_SIZE = 5555 # Translates to roughly 500 hectares at 30m resolution (500 * 10000 / (30*30) = 5555 cells)
-# 0. Argument parser
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -65,7 +64,6 @@ def parse_args():
 
     return parser.parse_args()
 
-# 1. GRASS Setup
 def setup_grass_session(grassdb: str, epsg: int, project_name: str = "hydro_project"):
     grassdb_path = Path(grassdb).resolve()
     location = project_name
@@ -229,7 +227,7 @@ def compute_catchment_area(flow_acc_rast: str,
  
     print("Catchment area: Computing contributing area in m² …")
  
-    # Retrieve current region resolution
+    # Retrieving current region resolution
     region = gs.region()
     cell_area = abs(region["nsres"]) * abs(region["ewres"])
     print(f"Catchment area: Cell area = {cell_area:.2f} m²")
@@ -240,7 +238,7 @@ def compute_catchment_area(flow_acc_rast: str,
         overwrite=True
     )
  
-    # Set a human-readable unit in the raster metadata
+    # Setting a human-readable unit in the raster metadata
     gs.run_command(
         "r.support",
         map=output_rast,
@@ -364,20 +362,7 @@ def compute_catchments_with_stream_order(
     flow_acc_rast: str,
     output_vector: str = "catchments_with_order"
 ) -> str:
-    """
-    Delineate one catchment polygon per stream segment and tag it with
-    the Strahler order of that segment.
-
-    Strategy:
-      1. r.stats to cross-tabulate micro_watersheds × streams_rast
-         → find which stream segment (if any) runs through each basin.
-      2. r.stats to read Strahler order per stream segment.
-      3. Join: basin_id → seg_id → strahler_order.
-      4. Write a reclass rule file and produce a new integer raster
-         where each basin cell holds its Strahler order.
-      5. r.to.vect to polygonise → every polygon attribute carries
-         the Strahler order of its stream.
-    """
+   
     import grass.script as gs
     from grass.script import array as garray
     import tempfile, os
@@ -385,9 +370,6 @@ def compute_catchments_with_stream_order(
 
     print("Catchments with stream order: building …")
 
-    # ── 1. Which stream segment runs through each micro-watershed? ─────────────
-    # Cross-tabulate basin IDs against stream segment IDs.
-    # r.stats on two rasters gives "basin_id  seg_id  count" for co-occurring cells.
     cross_raw = gs.read_command(
         "r.stats",
         input=f"{micro_watersheds_rast},{streams_rast}",
@@ -406,7 +388,6 @@ def compute_catchments_with_stream_order(
         if basin_id not in basin_to_seg or count > basin_to_seg[basin_id][1]:
             basin_to_seg[basin_id] = (seg_id, count)
 
-    # ── 2. Strahler order per stream segment ──────────────────────────────────
     order_raw = gs.read_command(
         "r.stats",
         input=f"{streams_rast},{strahler_rast}",
@@ -426,7 +407,6 @@ def compute_catchments_with_stream_order(
             f"and '{strahler_rast}' overlap spatially."
         )
 
-    # ── 3. Join: basin_id → strahler_order ────────────────────────────────────
     basin_to_order: dict[int, int] = {}
     unmatched = []
     for basin_id, (seg_id, _) in basin_to_seg.items():
@@ -439,7 +419,6 @@ def compute_catchments_with_stream_order(
         print(f"  [WARN] {len(unmatched)} basins had no matching stream order "
               f"(headwater slivers?) — they will be NULL in output.")
 
-    # ── 4. Reclassify micro-watershed raster → strahler order values ──────────
     temp_order_rast = "tmp_catchment_strahler"
     rules_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
     for basin_id, order in basin_to_order.items():
@@ -456,8 +435,6 @@ def compute_catchments_with_stream_order(
     )
     os.unlink(rules_file.name)
 
-    # ── 5. Polygonise: each catchment polygon carries its Strahler order ───────
-    # r.to.vect column= sets the attribute name for the raster value.
     gs.run_command(
         "r.to.vect",
         input=temp_order_rast,
@@ -511,7 +488,6 @@ def export_outputs(output_dir, rasters_to_export: dict, vectors_to_export: dict)
 
 # Main function
 def main():
-    # 0. Arguments parsing
     args = parse_args()
 
     os.makedirs(args.output, exist_ok=True)
@@ -550,7 +526,6 @@ def main():
     plt.colorbar(ax.images[0], ax=ax, label='Elevation(m)')
     plt.savefig(Path(args.output) / "dem_with_watershed.png", dpi=300, bbox_inches='tight')
     plt.show()
-    # 1. Setup GRASS session
     
     name_of_proj = Path(args.output).resolve().name
     session = setup_grass_session(args.grassdb, epsg, name_of_proj)
